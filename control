@@ -1,0 +1,8 @@
+Package: com.spotify.medialyrics
+Name: SpotifyMediaLyrics
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Send EeveeSpotify lyrics to iOS media controls
+Maintainer: SpotifyMediaLyrics
+Author: SpotifyMediaLyrics
+Section: Tweaks
