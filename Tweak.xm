@@ -1,58 +1,105 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import <objc/message.h>
 
-#pragma mark - Logging
-
-static void SMLLog(NSString *format, ...)
+static NSString *SMLLogPath(void)
 {
-    va_list args;
-    va_start(args, format);
+    NSArray *paths =
+        NSSearchPathForDirectoriesInDomains(
+            NSDocumentDirectory,
+            NSUserDomainMask,
+            YES
+        );
 
-    NSString *message =
-        [[NSString alloc] initWithFormat:format arguments:args];
+    NSString *documents = paths.firstObject;
 
-    va_end(args);
+    if (!documents) {
+        return @"/tmp/SpotifyMediaLyrics_runtime.log";
+    }
 
-    NSLog(@"[SpotifyMediaLyrics] %@", message);
+    return [documents stringByAppendingPathComponent:
+            @"SpotifyMediaLyrics_runtime.log"];
 }
 
-#pragma mark - Class Probe
-
-static void DumpMethods(Class cls)
+static void SMLWrite(NSString *text)
 {
+    NSString *line =
+        [NSString stringWithFormat:@"%@\n", text];
+
+    NSLog(@"[SpotifyMediaLyrics] %@", text);
+
+    NSString *path = SMLLogPath();
+
+    NSFileHandle *handle =
+        [NSFileHandle fileHandleForWritingAtPath:path];
+
+    if (!handle) {
+        [line writeToFile:path
+              atomically:YES
+                encoding:NSUTF8StringEncoding
+                   error:nil];
+        return;
+    }
+
+    [handle seekToEndOfFile];
+
+    [handle writeData:
+        [line dataUsingEncoding:NSUTF8StringEncoding]];
+
+    [handle closeFile];
+}
+
+static void ProbeClass(const char *name)
+{
+    if (!name) {
+        return;
+    }
+
+    Class cls = objc_getClass(name);
+
     if (!cls) {
+        SMLWrite(
+            [NSString stringWithFormat:
+                @"NOT FOUND: %s",
+                name]
+        );
         return;
     }
 
-    const char *className = class_getName(cls);
-
-    if (!className) {
-        return;
-    }
-
-    SMLLog(@"FOUND CLASS: %s", className);
+    SMLWrite(
+        [NSString stringWithFormat:
+            @"FOUND CLASS: %s",
+            class_getName(cls)]
+    );
 
     Class superClass = class_getSuperclass(cls);
 
     if (superClass) {
-        const char *superName = class_getName(superClass);
-
-        if (superName) {
-            SMLLog(@"SUPERCLASS: %s", superName);
-        }
+        SMLWrite(
+            [NSString stringWithFormat:
+                @"SUPER: %s",
+                class_getName(superClass)]
+        );
     }
 
     unsigned int count = 0;
 
-    Method *methods = class_copyMethodList(cls, &count);
+    Method *methods =
+        class_copyMethodList(cls, &count);
 
     if (!methods) {
-        SMLLog(@"NO DIRECT METHODS: %s", className);
+        SMLWrite(
+            [NSString stringWithFormat:
+                @"NO DIRECT METHODS: %s",
+                class_getName(cls)]
+        );
         return;
     }
 
-    SMLLog(@"METHOD COUNT: %u", count);
+    SMLWrite(
+        [NSString stringWithFormat:
+            @"METHOD COUNT: %u",
+            count]
+    );
 
     for (unsigned int i = 0; i < count; i++) {
 
@@ -68,54 +115,43 @@ static void DumpMethods(Class cls)
             continue;
         }
 
-        const char *selectorName = sel_getName(selector);
+        const char *selectorName =
+            sel_getName(selector);
 
         if (!selectorName) {
             continue;
         }
 
-        const char *types = method_getTypeEncoding(method);
+        const char *types =
+            method_getTypeEncoding(method);
 
         if (types) {
-            SMLLog(@"METHOD: %s | TYPES: %s",
-                   selectorName,
-                   types);
+
+            SMLWrite(
+                [NSString stringWithFormat:
+                    @"METHOD: %s | TYPES: %s",
+                    selectorName,
+                    types]
+            );
+
         } else {
-            SMLLog(@"METHOD: %s",
-                   selectorName);
+
+            SMLWrite(
+                [NSString stringWithFormat:
+                    @"METHOD: %s",
+                    selectorName]
+            );
         }
     }
 
     free(methods);
 }
 
-#pragma mark - Target Search
-
-static void ProbeClass(const char *name)
-{
-    if (!name) {
-        return;
-    }
-
-    Class cls = objc_getClass(name);
-
-    if (!cls) {
-        SMLLog(@"NOT FOUND: %s", name);
-        return;
-    }
-
-    DumpMethods(cls);
-}
-
 static void RunProbe(void)
 {
-    SMLLog(@"========================================");
-    SMLLog(@"SPOTIFY MEDIA LYRICS PROBE START");
-    SMLLog(@"========================================");
-
-    /*
-     * Spotify 9.1.88
-     */
+    SMLWrite(@"========================================");
+    SMLWrite(@"RUNTIME PROBE START");
+    SMLWrite(@"========================================");
 
     ProbeClass(
         "_TtC17Canvas_CommonImpl29CanvasNowPlayingLyricsManager"
@@ -141,35 +177,26 @@ static void RunProbe(void)
         "_TtC27Lyrics_RemoteDataSourceImpl20LyricsDataLoaderImpl"
     );
 
-    SMLLog(@"========================================");
-    SMLLog(@"SPOTIFY MEDIA LYRICS PROBE END");
-    SMLLog(@"========================================");
+    SMLWrite(@"========================================");
+    SMLWrite(@"RUNTIME PROBE END");
+    SMLWrite(@"========================================");
 }
-
-#pragma mark - Constructor
 
 __attribute__((constructor))
 static void SpotifyMediaLyricsInit(void)
 {
-    /*
-     * This message must appear if the dylib is actually loaded.
-     */
-    SMLLog(@"========================================");
-    SMLLog(@"LOADED");
-    SMLLog(@"SpotifyMediaLyrics Safe Probe");
-    SMLLog(@"========================================");
+    SMLWrite(@"");
+    SMLWrite(@"########################################");
+    SMLWrite(@"SpotifyMediaLyrics LOADED");
+    SMLWrite(@"########################################");
 
-    /*
-     * Wait for Spotify frameworks/components to finish loading.
-     */
     dispatch_after(
         dispatch_time(
             DISPATCH_TIME_NOW,
-            (int64_t)(10 * NSEC_PER_SEC)
+            (int64_t)(8 * NSEC_PER_SEC)
         ),
         dispatch_get_main_queue(),
         ^{
-            SMLLog(@"Starting delayed probe...");
             RunProbe();
         }
     );
