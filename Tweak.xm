@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <MediaPlayer/MediaPlayer.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 static void SMLHookedSetNowPlayingInfo(
     MPNowPlayingInfoCenter *self,
