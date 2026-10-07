@@ -1,141 +1,176 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
-#pragma mark - Safe Class Probe
+#pragma mark - Logging
 
-static void DumpClassMethods(const char *className)
+static void SMLLog(NSString *format, ...)
 {
-    Class cls = objc_getClass(className);
+    va_list args;
+    va_start(args, format);
 
+    NSString *message =
+        [[NSString alloc] initWithFormat:format arguments:args];
+
+    va_end(args);
+
+    NSLog(@"[SpotifyMediaLyrics] %@", message);
+}
+
+#pragma mark - Class Probe
+
+static void DumpMethods(Class cls)
+{
     if (!cls) {
-        NSLog(@"[SpotifyMediaLyrics] CLASS NOT FOUND: %s", className);
         return;
     }
 
-    NSLog(@"[SpotifyMediaLyrics] ========================================");
-    NSLog(@"[SpotifyMediaLyrics] FOUND CLASS: %s", className);
+    const char *className = class_getName(cls);
 
-    Class superCls = class_getSuperclass(cls);
+    if (!className) {
+        return;
+    }
 
-    if (superCls) {
-        const char *superName = class_getName(superCls);
+    SMLLog(@"FOUND CLASS: %s", className);
+
+    Class superClass = class_getSuperclass(cls);
+
+    if (superClass) {
+        const char *superName = class_getName(superClass);
 
         if (superName) {
-            NSLog(@"[SpotifyMediaLyrics] SUPERCLASS: %s", superName);
+            SMLLog(@"SUPERCLASS: %s", superName);
         }
     }
 
     unsigned int count = 0;
+
     Method *methods = class_copyMethodList(cls, &count);
 
     if (!methods) {
-        NSLog(@"[SpotifyMediaLyrics] NO DIRECT METHODS: %s", className);
+        SMLLog(@"NO DIRECT METHODS: %s", className);
         return;
     }
 
-    NSLog(@"[SpotifyMediaLyrics] DIRECT METHOD COUNT: %u", count);
+    SMLLog(@"METHOD COUNT: %u", count);
 
     for (unsigned int i = 0; i < count; i++) {
 
-        SEL selector = method_getName(methods[i]);
+        Method method = methods[i];
+
+        if (!method) {
+            continue;
+        }
+
+        SEL selector = method_getName(method);
 
         if (!selector) {
             continue;
         }
 
-        const char *methodName = sel_getName(selector);
+        const char *selectorName = sel_getName(selector);
 
-        if (!methodName) {
+        if (!selectorName) {
             continue;
         }
 
-        const char *typeEncoding = method_getTypeEncoding(methods[i]);
+        const char *types = method_getTypeEncoding(method);
 
-        if (typeEncoding) {
-            NSLog(@"[SpotifyMediaLyrics] METHOD: %s | TYPES: %s",
-                  methodName,
-                  typeEncoding);
+        if (types) {
+            SMLLog(@"METHOD: %s | TYPES: %s",
+                   selectorName,
+                   types);
         } else {
-            NSLog(@"[SpotifyMediaLyrics] METHOD: %s",
-                  methodName);
+            SMLLog(@"METHOD: %s",
+                   selectorName);
         }
     }
 
     free(methods);
-
-    NSLog(@"[SpotifyMediaLyrics] ========================================");
 }
 
+#pragma mark - Target Search
 
-#pragma mark - Target Classes
-
-static void ScanSpotifyLyricsClasses(void)
+static void ProbeClass(const char *name)
 {
-    NSLog(@"[SpotifyMediaLyrics] ");
-    NSLog(@"[SpotifyMediaLyrics] ****************************************");
-    NSLog(@"[SpotifyMediaLyrics] SPOTIFY 9.1.88 LYRICS PROBE START");
-    NSLog(@"[SpotifyMediaLyrics] ****************************************");
+    if (!name) {
+        return;
+    }
+
+    Class cls = objc_getClass(name);
+
+    if (!cls) {
+        SMLLog(@"NOT FOUND: %s", name);
+        return;
+    }
+
+    DumpMethods(cls);
+}
+
+static void RunProbe(void)
+{
+    SMLLog(@"========================================");
+    SMLLog(@"SPOTIFY MEDIA LYRICS PROBE START");
+    SMLLog(@"========================================");
 
     /*
      * Spotify 9.1.88
-     *
-     * These are the actual Swift classes found inside
-     * the current Spotify binary.
      */
 
-    DumpClassMethods(
+    ProbeClass(
         "_TtC17Canvas_CommonImpl29CanvasNowPlayingLyricsManager"
     );
 
-    DumpClassMethods(
+    ProbeClass(
         "_TtC17Canvas_CommonImpl26CanvasNowPlayingLyricsView"
     );
 
-    DumpClassMethods(
+    ProbeClass(
         "_TtC17Canvas_CommonImpl33CanvasNowPlayingLyricsElementView"
     );
 
-    DumpClassMethods(
+    ProbeClass(
         "_TtC24Lyrics_TextComponentImpl34LyricsViewControllerImplementation"
     );
 
-    DumpClassMethods(
+    ProbeClass(
         "_TtC24Lyrics_TextComponentImpl10LyricsView"
     );
 
-    DumpClassMethods(
+    ProbeClass(
         "_TtC27Lyrics_RemoteDataSourceImpl20LyricsDataLoaderImpl"
     );
 
-    NSLog(@"[SpotifyMediaLyrics] ****************************************");
-    NSLog(@"[SpotifyMediaLyrics] SPOTIFY 9.1.88 LYRICS PROBE END");
-    NSLog(@"[SpotifyMediaLyrics] ****************************************");
+    SMLLog(@"========================================");
+    SMLLog(@"SPOTIFY MEDIA LYRICS PROBE END");
+    SMLLog(@"========================================");
 }
 
-
-#pragma mark - Plugin Entry
+#pragma mark - Constructor
 
 __attribute__((constructor))
 static void SpotifyMediaLyricsInit(void)
 {
-    NSLog(@"[SpotifyMediaLyrics] ========================================");
-    NSLog(@"[SpotifyMediaLyrics] LOADED");
-    NSLog(@"[SpotifyMediaLyrics] Build: SafeLyricsProbe-9.1.88");
-    NSLog(@"[SpotifyMediaLyrics] ========================================");
+    /*
+     * This message must appear if the dylib is actually loaded.
+     */
+    SMLLog(@"========================================");
+    SMLLog(@"LOADED");
+    SMLLog(@"SpotifyMediaLyrics Safe Probe");
+    SMLLog(@"========================================");
 
     /*
-     * Do not inspect the runtime immediately.
-     *
-     * Wait until Spotify has finished loading its components.
+     * Wait for Spotify frameworks/components to finish loading.
      */
     dispatch_after(
         dispatch_time(
             DISPATCH_TIME_NOW,
-            (int64_t)(8 * NSEC_PER_SEC)
+            (int64_t)(10 * NSEC_PER_SEC)
         ),
         dispatch_get_main_queue(),
         ^{
-            ScanSpotifyLyricsClasses();
+            SMLLog(@"Starting delayed probe...");
+            RunProbe();
         }
     );
 }
