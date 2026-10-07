@@ -5,55 +5,131 @@
 
 static IMP SMLOriginalSetNowPlayingInfo = NULL;
 
+#pragma mark - Private Now Playing Content Item
+
+static id SMLGetContentItem(void)
+{
+    MPNowPlayingInfoCenter *center =
+        [MPNowPlayingInfoCenter defaultCenter];
+
+    SEL selector =
+        NSSelectorFromString(@"nowPlayingContentItem");
+
+    if (![center respondsToSelector:selector]) {
+        NSLog(@"[SpotifyMediaLyrics] nowPlayingContentItem NOT AVAILABLE");
+        return nil;
+    }
+
+    id (*Getter)(id, SEL) =
+        (id (*)(id, SEL))objc_msgSend;
+
+    id item = Getter(center, selector);
+
+    if (!item) {
+        NSLog(@"[SpotifyMediaLyrics] ContentItem = NIL");
+        return nil;
+    }
+
+    NSLog(
+        @"[SpotifyMediaLyrics] ContentItem FOUND: %s",
+        class_getName(object_getClass(item))
+    );
+
+    return item;
+}
+
+static void SMLTestContentItem(void)
+{
+    id item = SMLGetContentItem();
+
+    if (!item) {
+        return;
+    }
+
+    SEL titleSelector =
+        NSSelectorFromString(@"title");
+
+    SEL setTitleSelector =
+        NSSelectorFromString(@"setTitle:");
+
+    NSString *oldTitle = nil;
+
+    if ([item respondsToSelector:titleSelector]) {
+
+        id (*GetTitle)(id, SEL) =
+            (id (*)(id, SEL))objc_msgSend;
+
+        oldTitle =
+            GetTitle(item, titleSelector);
+
+        NSLog(
+            @"[SpotifyMediaLyrics] ContentItem title = %@",
+            oldTitle
+        );
+    }
+
+    if ([item respondsToSelector:setTitleSelector]) {
+
+        void (*SetTitle)(id, SEL, id) =
+            (void (*)(id, SEL, id))objc_msgSend;
+
+        NSString *testTitle =
+            [NSString stringWithFormat:
+                @"[SML ITEM] %@",
+                oldTitle ?: @"TEST"];
+
+        SetTitle(
+            item,
+            setTitleSelector,
+            testTitle
+        );
+
+        NSLog(
+            @"[SpotifyMediaLyrics] ContentItem title SET: %@",
+            testTitle
+        );
+    } else {
+
+        NSLog(
+            @"[SpotifyMediaLyrics] ContentItem setTitle: NOT FOUND"
+        );
+    }
+}
+
+#pragma mark - Now Playing Hook
+
 static void SMLHookedSetNowPlayingInfo(
     MPNowPlayingInfoCenter *self,
     SEL _cmd,
     NSDictionary *info
 )
 {
-    NSMutableDictionary *newInfo =
-        info ? [info mutableCopy]
-             : [NSMutableDictionary dictionary];
-
-    NSString *title =
-        newInfo[MPMediaItemPropertyTitle];
-
-    if (!title) {
-        title = @"";
-    }
-
-    /*
-     * 测试：
-     * 只在还没有 [SML HOOK] 的情况下添加。
-     * 防止 Spotify 自己重复调用时不断叠加。
-     */
-    if (![title hasPrefix:@"[SML HOOK]"]) {
-
-        newInfo[MPMediaItemPropertyTitle] =
-            [NSString stringWithFormat:
-                @"[SML HOOK] %@",
-                title];
-    }
-
-    /*
-     * 关键：
-     * 调用原始 IMP，而不是 objc_msgSend。
-     * 否则会递归调用自己导致崩溃。
-     */
     if (SMLOriginalSetNowPlayingInfo) {
 
         ((void (*)(id, SEL, NSDictionary *))
             SMLOriginalSetNowPlayingInfo)(
                 self,
                 _cmd,
-                newInfo
+                info
         );
     }
+
+    /*
+     * Spotify 写入 Now Playing 后，
+     * 尝试取得私有 MPNowPlayingContentItem。
+     */
+    SMLTestContentItem();
 }
+
+#pragma mark - Init
 
 __attribute__((constructor))
 static void SpotifyMediaLyricsInit(void)
 {
+    NSLog(
+        @"[SpotifyMediaLyrics] PRIVATE CONTENT ITEM TEST LOADED"
+    );
+
     dispatch_after(
         dispatch_time(
             DISPATCH_TIME_NOW,
@@ -65,6 +141,9 @@ static void SpotifyMediaLyricsInit(void)
                 objc_getClass("MPNowPlayingInfoCenter");
 
             if (!cls) {
+                NSLog(
+                    @"[SpotifyMediaLyrics] MPNowPlayingInfoCenter NOT FOUND"
+                );
                 return;
             }
 
@@ -78,6 +157,9 @@ static void SpotifyMediaLyricsInit(void)
                 );
 
             if (!method) {
+                NSLog(
+                    @"[SpotifyMediaLyrics] setNowPlayingInfo NOT FOUND"
+                );
                 return;
             }
 
@@ -85,12 +167,19 @@ static void SpotifyMediaLyricsInit(void)
                 method_getImplementation(method);
 
             if (!SMLOriginalSetNowPlayingInfo) {
+                NSLog(
+                    @"[SpotifyMediaLyrics] ORIGINAL IMP NOT FOUND"
+                );
                 return;
             }
 
             method_setImplementation(
                 method,
                 (IMP)SMLHookedSetNowPlayingInfo
+            );
+
+            NSLog(
+                @"[SpotifyMediaLyrics] NOW PLAYING HOOK READY"
             );
         }
     );
