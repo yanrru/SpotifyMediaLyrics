@@ -3,6 +3,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
+static IMP SMLOriginalSetNowPlayingInfo = NULL;
+
 static void SMLHookedSetNowPlayingInfo(
     MPNowPlayingInfoCenter *self,
     SEL _cmd,
@@ -10,11 +12,8 @@ static void SMLHookedSetNowPlayingInfo(
 )
 {
     NSMutableDictionary *newInfo =
-        [info mutableCopy];
-
-    if (!newInfo) {
-        newInfo = [NSMutableDictionary dictionary];
-    }
+        info ? [info mutableCopy]
+             : [NSMutableDictionary dictionary];
 
     NSString *title =
         newInfo[MPMediaItemPropertyTitle];
@@ -23,31 +22,33 @@ static void SMLHookedSetNowPlayingInfo(
         title = @"";
     }
 
-    NSString *artist =
-        newInfo[MPMediaItemPropertyArtist];
+    /*
+     * 测试：
+     * 只在还没有 [SML HOOK] 的情况下添加。
+     * 防止 Spotify 自己重复调用时不断叠加。
+     */
+    if (![title hasPrefix:@"[SML HOOK]"]) {
 
-    if (!artist) {
-        artist = @"";
+        newInfo[MPMediaItemPropertyTitle] =
+            [NSString stringWithFormat:
+                @"[SML HOOK] %@",
+                title];
     }
 
-    NSString *newTitle =
-        [NSString stringWithFormat:
-            @"[SML HOOK] %@",
-            title];
+    /*
+     * 关键：
+     * 调用原始 IMP，而不是 objc_msgSend。
+     * 否则会递归调用自己导致崩溃。
+     */
+    if (SMLOriginalSetNowPlayingInfo) {
 
-    newInfo[MPMediaItemPropertyTitle] = newTitle;
-
-    NSLog(
-        @"[SpotifyMediaLyrics] NOW PLAYING: %@ - %@",
-        artist,
-        title
-    );
-
-    ((void (*)(id, SEL, NSDictionary *))objc_msgSend)(
-        self,
-        _cmd,
-        newInfo
-    );
+        ((void (*)(id, SEL, NSDictionary *))
+            SMLOriginalSetNowPlayingInfo)(
+                self,
+                _cmd,
+                newInfo
+        );
+    }
 }
 
 __attribute__((constructor))
@@ -64,9 +65,6 @@ static void SpotifyMediaLyricsInit(void)
                 objc_getClass("MPNowPlayingInfoCenter");
 
             if (!cls) {
-                NSLog(
-                    @"[SpotifyMediaLyrics] MPNowPlayingInfoCenter NOT FOUND"
-                );
                 return;
             }
 
@@ -80,19 +78,19 @@ static void SpotifyMediaLyricsInit(void)
                 );
 
             if (!method) {
-                NSLog(
-                    @"[SpotifyMediaLyrics] setNowPlayingInfo NOT FOUND"
-                );
+                return;
+            }
+
+            SMLOriginalSetNowPlayingInfo =
+                method_getImplementation(method);
+
+            if (!SMLOriginalSetNowPlayingInfo) {
                 return;
             }
 
             method_setImplementation(
                 method,
                 (IMP)SMLHookedSetNowPlayingInfo
-            );
-
-            NSLog(
-                @"[SpotifyMediaLyrics] MPNowPlayingInfoCenter HOOKED"
             );
         }
     );
